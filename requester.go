@@ -162,15 +162,14 @@ func NewRequester(concurrency int, requests int64, duration time.Duration, reqRa
 }
 
 func addMissingPort(addr string, isTLS bool) string {
-	n := strings.Index(addr, ":")
-	if n >= 0 {
+	if _, _, err := net.SplitHostPort(addr); err == nil {
 		return addr
 	}
 	port := 80
 	if isTLS {
 		port = 443
 	}
-	return net.JoinHostPort(addr, strconv.Itoa(port))
+	return net.JoinHostPort(strings.Trim(addr, "[]"), strconv.Itoa(port))
 }
 
 func buildTLSConfig(opt *ClientOpt) (*tls.Config, error) {
@@ -214,7 +213,15 @@ func buildRequestClient(opt *ClientOpt, r *int64, w *int64) (*fasthttp.HostClien
 	} else if opt.httpProxy != "" {
 		httpClient.Dial = fasthttpproxy.FasthttpHTTPDialerDualStack(opt.httpProxy)
 	} else {
-		httpClient.Dial = fasthttpproxy.FasthttpProxyHTTPDialerTimeout(opt.dialTimeout)
+		dialer := fasthttpproxy.Dialer{
+			Timeout:        opt.dialTimeout,
+			ConnectTimeout: opt.dialTimeout,
+			DialDualStack:  true,
+		}
+		httpClient.Dial, err = dialer.GetDialFunc(true)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	httpClient.Dial = ThroughputInterceptorDial(httpClient.Dial, r, w)
 
