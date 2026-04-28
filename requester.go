@@ -247,7 +247,7 @@ func buildRequestClient(opt *ClientOpt, r *int64, w *int64) (*fasthttp.HostClien
 		if len(n) != 2 {
 			return nil, nil, fmt.Errorf("invalid header: %s", h)
 		}
-		requestHeader.Set(n[0], n[1])
+		requestHeader.Set(strings.TrimSpace(n[0]), strings.TrimSpace(n[1]))
 	}
 
 	return httpClient, &requestHeader, nil
@@ -305,14 +305,23 @@ func (r *Requester) Run() {
 	// handle ctrl-c
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigs)
 
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	r.cancel = cancelFunc
+	signalDone := make(chan struct{})
 	go func() {
-		<-sigs
-		r.closeRecord()
+		defer close(signalDone)
+		select {
+		case <-sigs:
+			r.closeRecord()
+			cancelFunc()
+		case <-ctx.Done():
+		}
+	}()
+	defer func() {
+		signal.Stop(sigs)
 		cancelFunc()
+		<-signalDone
 	}()
 	atomic.StoreInt64(&startTimeUnixNano, time.Now().UnixNano())
 	if r.duration > 0 {
